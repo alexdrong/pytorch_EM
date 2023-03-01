@@ -1,6 +1,6 @@
 import pytest
 
-from pytorch_test.pytorch_test import main
+from pytorch_test.pytorch_test import read_TE_list, read_pkl_list, main, l1em_torch_csr
 
 
 def test_help(monkeypatch, capsys):
@@ -9,3 +9,15 @@ def test_help(monkeypatch, capsys):
         main()
     captured = capsys.readouterr()
     assert "usage" in captured.out
+
+
+def test_read_TE_list():
+    read_TE_list("tests/test_data/TE_list.txt")
+
+
+def test_read_pkl_list():
+    read_pkl_list("tests/test_data/G_of_R_list.txt")
+
+
+def test_l1em_torch_csr():
+    l1em_torch_csr(TE_list="tests/test_data/TE_list.txt", G_of_R_list_file="tests/test_data/G_of_R_list.txt", device_name='cpu', X_dense=True)

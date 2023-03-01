@@ -1,0 +1,1 @@
+tests/test_data/L1.aa.aln.bam.0.pk2
