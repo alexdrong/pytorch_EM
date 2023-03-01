@@ -78,8 +78,8 @@ def parse_args(args):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--device', type=str, help='device', default='cpu', choices=['cpu', 'cuda'])
     parser.add_argument('--X_dense', type=bool, help='X_dense', default=True)
-    parser.add_argument('--TE_list', type=str, help='TE_list', default='TE_list.txt')
-    parser.add_argument('--G_of_R_list_file', type=str, help='G_of_R_list_file', default='G_of_R_list.txt')
+    parser.add_argument('--TE_list', type=str, help='TE_list', default='tests/test_data/TE_list.txt')
+    parser.add_argument('--G_of_R_list_file', type=str, help='G_of_R_list_file', default='tests/test_data/G_of_R_list.txt')
     parser.add_argument('--loglevel', type=str, help='log level', default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
     return parser.parse_args(args)
 
