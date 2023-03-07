@@ -1,6 +1,6 @@
 import pytest
 
-from pytorch_test.pytorch_test import read_TE_list, read_pkl_list, main, EMRunner, TorchCSRStrategy
+from pytorch_test.pytorch_test import read_TE_list, read_pkl_list, main, EMRunner, TorchCSRStrategy, ScipyCSRStrategy
 
 
 def test_help(monkeypatch, capsys):
@@ -20,5 +20,12 @@ def test_read_pkl_list():
 
 
 def test_l1em_torch_csr():
-    emrunner = EMRunner(TorchCSRStrategy(), TE_list="tests/test_data/TE_list.txt", G_of_R_list_file="tests/test_data/G_of_R_list.txt", device_name='cpu')
+    emrunner = EMRunner(TorchCSRStrategy(device_name='cpu', G_of_R_list_file="tests/test_data/G_of_R_list.txt"),
+                        TE_list="tests/test_data/TE_list.txt", stop_thresh=1e-5, max_nEMsteps=250)
+    X, times = emrunner.run_em()
+
+
+def test_l1em_scipy_csr():
+    emrunner = EMRunner(ScipyCSRStrategy(G_of_R_list_file="tests/test_data/G_of_R_list.txt"),
+                        TE_list="tests/test_data/TE_list.txt", stop_thresh=1e-5, max_nEMsteps=250)
     X, times = emrunner.run_em()
