@@ -41,7 +41,7 @@ def l1em_torch_csr(TE_list: str = "TE_list.txt", G_of_R_list_file: str = "G_of_R
     G_of_R = scipy_to_torch_sparse(G_of_R).coalesce().to_sparse_csr().to(device, dtype=torch.float32)
     X = (torch.ones(len(TE_names), dtype=torch.float32, requires_grad=False)/len(TE_names)).to(device)
     logging.info("starting EM")
-    max_nEMsteps = 250
+    max_nEMsteps = 10000
     stop_thresh = 1e-6
     step_times = []
     if device_name == 'cuda':
@@ -81,13 +81,16 @@ def parse_args(args):
     parser.add_argument('--TE_list', type=str, help='TE_list', default='tests/test_data/TE_list.txt')
     parser.add_argument('--G_of_R_list_file', type=str, help='G_of_R_list_file', default='tests/test_data/G_of_R_list.txt')
     parser.add_argument('--loglevel', type=str, help='log level', default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
+    parser.add_argument('--X_out', '-o', type=str, help='X_out', default='tests/test_data/X.pkl')
     return parser.parse_args(args)
 
 
 def main():
     args = parse_args(sys.argv[1:])
-    l1em_torch_csr(TE_list=args.TE_list, G_of_R_list_file=args.G_of_R_list_file, device_name=args.device, X_dense=args.X_dense)
     logging.basicConfig(level=args.loglevel)
+    X, times = l1em_torch_csr(TE_list=args.TE_list, G_of_R_list_file=args.G_of_R_list_file, device_name=args.device, X_dense=args.X_dense)
+    with open(args.X_out, 'wb') as fh:
+        pickle.dump(X.cpu().numpy(), fh)
 
 
 if __name__ == "__main__":
