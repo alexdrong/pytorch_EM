@@ -1,14 +1,14 @@
-import argparse
-import logging
-import sys
-import pickle
-from scipy import sparse
-import numpy
+
 import datetime
-import torch
+import logging
+import pickle
 from abc import ABC, abstractmethod
-from typing import Tuple, List
+from typing import List, Tuple
+import torch
+import numpy
 from numpy.typing import NDArray
+from scipy import sparse
+from multiprocessing import Pool
 
 
 def read_pkl_list(G_of_R_list_file: str = "G_of_R_list.txt"):
@@ -18,13 +18,6 @@ def read_pkl_list(G_of_R_list_file: str = "G_of_R_list.txt"):
         for pkl_file in pkl_file_list:
             G_of_R_list.append(pickle.load(open(pkl_file, 'rb'), encoding="latin1"))
     return sparse.vstack(G_of_R_list)
-
-
-def read_TE_list(TE_list: str = "TE_list.txt"):
-    TE_names = list()
-    for name in open(TE_list):
-        TE_names.append(name.strip().split('\t')[0])
-    return TE_names
 
 
 def scipy_to_torch_sparse(scipy_sparse):
@@ -58,6 +51,7 @@ class TorchCSRStrategy(EMStrategy):
     Concrete EM Strategy implementing the algorithm using torch.sparse_csr while following the base EMStrategy
     interface. The interface makes them interchangeable in the Context.
     """
+
     def __init__(self, device_name: str = 'cpu', G_of_R_list_file: str = "G_of_R_list.txt") -> None:
         self.device = torch.device(device_name)
         logging.info("reading pkl files")
@@ -128,76 +122,86 @@ class ScipyCSRStrategy(EMStrategy):
         pickle.dump(X, open(out_file, 'wb'))
 
 
-class EMRunner():
+class ScipyCSRMultiprocessingStrategy(EMStrategy):
     """
-    Interface for running EM
+    Concrete EM Strategy implementing the algorithm using scipy.sparse_csr and multiprocessing while following the base EMStrategy
     """
+    def __init__(self, G_of_R_list_file: str = "G_of_R_list.txt", TE_list: str = "TE_list.txt", nThreads: int = 2) -> None:
+        self.nThreads = nThreads
+    # All the transcripts names in the same order as the G_of_R matrix columns
+    # Intial guess
+        self.TE_names = list()
+        for name in open(TE_list):
+            self.TE_names.append(name.strip().split('\t')[0])
+        self.X = sparse.csr_matrix(numpy.ones((1, len(self.TE_names)), dtype=numpy.float64)/len(self.TE_names))
+        # Split up the pickle files into a set for each thread.
+        G_of_R_pkl_fulllist = list()
+        for G_of_R_pkl in open(G_of_R_list_file):
+            G_of_R_pkl_fulllist.append(G_of_R_pkl.strip())
+        self.G_of_R_pkl_lists = list()
+        listsize = len(G_of_R_pkl_fulllist)//nThreads
+        nlistsp1 = len(G_of_R_pkl_fulllist) % nThreads
+        k = 0
+        for i in range(nlistsp1):
+            self.G_of_R_pkl_lists.append(G_of_R_pkl_fulllist[k:k+listsize+1])
+            k += listsize+1
+        for i in range(nlistsp1, nThreads):
+            self.G_of_R_pkl_lists.append(G_of_R_pkl_fulllist[k:k+listsize])
+            k += listsize
+            self.masterPool = Pool(processes=nThreads)
 
-    def __init__(self, strategy: EMStrategy, TE_list: str = "TE_list.txt", stop_thresh: float = 1e-6, max_nEMsteps: int = 10000) -> None:
-        """
-        Usually, the Context accepts a strategy through the constructor, but
-        also provides a setter to change it at runtime.
-        """
-        self.stop_thresh = stop_thresh
-        self.max_nEMsteps = max_nEMsteps
-        self._strategy = strategy
-        self.TE_names = read_TE_list(TE_list)
+    @staticmethod
+    def calculate_expcounts(G_of_R_pkl, X):
+        G_of_R_file = open(G_of_R_pkl, 'rb')
+        G_of_R = pickle.load(G_of_R_file, encoding='latin1')
+        G_of_R_file.close()
+        if G_of_R is None:
+            return 0.0, 0.0
+        L_of_R_mat = G_of_R.multiply(X)
+        L_of_R = numpy.array(L_of_R_mat.sum(1))
+        L_of_R_mat = L_of_R_mat[L_of_R[:, 0] >= 10**-200, :]
+        L_of_R = L_of_R[L_of_R >= 10**-200]
+        L_of_R_inv = sparse.csr_matrix(1.0/L_of_R).transpose()
+        exp_counts = L_of_R_mat.multiply(L_of_R_inv).sum(0)
+        loglik = numpy.sum(numpy.log(L_of_R))
 
-    @property
-    def strategy(self) -> EMStrategy:
-        """
-        The Context maintains a reference to one of the EMStrategy objects. The
-        Context does not know the concrete class of a strategy. It should work
-        with all strategies via the EMStrategy interface.
-        """
+        if numpy.isfinite(loglik):
+            return exp_counts, loglik
+        else:
+            return numpy.zeros(G_of_R.shape[1]), 0.0
 
-        return self._strategy
+    @staticmethod
+    def calculate_expcounts_chunk(input):
+        G_of_R_pkl_list, X_len = input
+        exp_counts = numpy.zeros(X_len.shape, dtype=numpy.float64)
+        loglik = 0.0
+        for G_of_R_pkl in G_of_R_pkl_list:
+            this_exp_counts, this_loglik = ScipyCSRMultiprocessingStrategy.calculate_expcounts(G_of_R_pkl, X_len)
+            exp_counts += this_exp_counts
+            loglik += this_loglik
+        return exp_counts, loglik
 
-    @strategy.setter
-    def strategy(self, strategy: EMStrategy) -> None:
-        """
-        Usually, the Context allows replacing a EMStrategy object at runtime.
-        """
+    # Run the EM steps
+    def do_algorithm(self, max_nEMsteps: int, stop_thresh: float) -> Tuple[NDArray[numpy.float32], List[float]]:
+        step_times: list[float] = []
+        for step in range(max_nEMsteps):
+            starttime = datetime.datetime.now()
+            exp_counts = numpy.zeros((1, len(self.TE_names)), dtype=numpy.float64)
+            loglik = 0.0
 
-        self._strategy = strategy
+            outputs = self.masterPool.map(ScipyCSRMultiprocessingStrategy.calculate_expcounts_chunk, zip(self.G_of_R_pkl_lists, [self.X]*int(self.nThreads)))
+            for output in outputs:
+                this_exp_counts, this_loglik = output
+                exp_counts += this_exp_counts
+                loglik += this_loglik
 
-    def run_em(self) -> Tuple[NDArray[numpy.float32], List[float]]:
-        """
-        The Context delegates some work to the EMStrategy object instead of
-        implementing multiple versions of the algorithm on its own.
-        """
-        logging.info("starting EM")
-        X, times = self._strategy.do_algorithm(self.max_nEMsteps, self.stop_thresh)
-        logging.info("finished EM")
-        return X, times
+            last_X = self.X.copy()
+            self.X = sparse.csr_matrix(exp_counts/numpy.sum(exp_counts))
+            print(step, numpy.max(numpy.abs(self.X.toarray()-last_X.toarray())), loglik, datetime.datetime.now()-starttime)
+            if numpy.max(numpy.abs(self.X.toarray()-last_X.toarray())) < stop_thresh:
+                break
+            step_times.append((datetime.datetime.now()-starttime).total_seconds())
+        return (self.X.todense(), step_times)
 
-
-def parse_args(args):
-    parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--device', type=str, help='device', default='cpu', choices=['cpu', 'cuda'])
-    parser.add_argument('--X_dense', type=bool, help='X_dense', default=True)
-    parser.add_argument('--TE_list', type=str, help='TE_list', default='tests/test_data/TE_list.txt')
-    parser.add_argument('--G_of_R_list_file', type=str, help='G_of_R_list_file', default='tests/test_data/G_of_R_list.txt')
-    parser.add_argument('--loglevel', type=str, help='log level', default='INFO', choices=['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'])
-    parser.add_argument('--X_out', '-o', type=str, help='X_out', default='tests/test_data/X.pkl')
-    parser.add_argument('--stop_thresh', type=float, help='stop_thresh', default=1e-6)
-    parser.add_argument('--max_nEMsteps', type=int, help='max_nEMsteps', default=10000)
-    parser.add_argument('--strategy', type=str, help='strategy', default='TorchCSRStrategy', choices=['TorchCSRStrategy', 'ScipyCSRStrategy'])
-    return parser.parse_args(args)
-
-
-def main():
-    args = parse_args(sys.argv[1:])
-    logging.basicConfig(level=args.loglevel, format='%(asctime)s %(levelname)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
-    if args.strategy == 'TorchCSRStrategy':
-        emrunner = EMRunner(TorchCSRStrategy(device_name=args.device, G_of_R_list_file=args.G_of_R_list_file),
-                            TE_list=args.TE_list, stop_thresh=args.stop_thresh, max_nEMsteps=args.max_nEMsteps)
-    if args.strategy == 'ScipyCSRStrategy':
-        emrunner = EMRunner(ScipyCSRStrategy(G_of_R_list_file=args.G_of_R_list_file),
-                            TE_list=args.TE_list, stop_thresh=args.stop_thresh, max_nEMsteps=args.max_nEMsteps)
-    X, times = emrunner.run_em()
-    emrunner.strategy.write_X(X, out_file=args.X_out)
-
-
-if __name__ == "__main__":
-    main()
+    def write_X(self, X: NDArray[numpy.float32], out_file: str = "X.pkl"):
+        pickle.dump(X, open(out_file, 'wb'))

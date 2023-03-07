@@ -1,6 +1,8 @@
 import pytest
 
-from pytorch_test.pytorch_test import read_TE_list, read_pkl_list, main, EMRunner, TorchCSRStrategy, ScipyCSRStrategy
+from pytorch_test.em_runner import EMRunner, read_TE_list
+from pytorch_test.em_strategies import ScipyCSRStrategy, TorchCSRStrategy, read_pkl_list
+from pytorch_test.__main__ import main
 
 
 def test_help(monkeypatch, capsys):
