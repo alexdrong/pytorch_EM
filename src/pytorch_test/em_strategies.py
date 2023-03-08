@@ -70,11 +70,11 @@ class TorchCSRMultiGPUStrategy(EMStrategy):
         for step in range(max_nEMsteps):
             starttime = datetime.datetime.now()
             loglik = torch.zeros(1)
-            exp_counts = torch.empty()
+            exp_counts = torch.empty(0)
             for i in range(self.nGPU):
                 L_of_R = self.G_of_R_split[i].matmul(self.X.to(f"cuda:{i}"))
                 L_of_R_inv = torch.pow(L_of_R, -1)
-                exp_counts += L_of_R_inv.matmul(self.G_of_R).multiply(self.X).to("cpu")
+                exp_counts = torch.cat(exp_counts, L_of_R_inv.matmul(self.G_of_R).multiply(self.X).to("cpu"))
                 loglik += torch.sum(torch.log(L_of_R)).to("cpu")
             X_new = exp_counts/torch.sum(exp_counts)
             print(step, torch.max(torch.abs(X_new-self.X)), loglik, datetime.datetime.now()-starttime)
