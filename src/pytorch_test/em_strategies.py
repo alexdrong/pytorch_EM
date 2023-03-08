@@ -46,6 +46,49 @@ class EMStrategy(ABC):
         ...
 
 
+class TorchCSRMultiGPUStrategy(EMStrategy):
+    """
+    Concrete EM Strategy implementing the algorithm using torch.sparse_csr while following the base EMStrategy
+    interface. The interface makes them interchangeable in the Context.
+    """
+
+    def __init__(self, G_of_R_list_file: str = "G_of_R_list.txt", nGPU: int = 4) -> None:
+        self.nGPU = nGPU
+        logging.info(f"running on {self.nGPU} out of {str(torch.cuda.device_count())} GPUs")
+        logging.info("reading pkl files")
+        self.G_of_R = read_pkl_list(G_of_R_list_file)
+        logging.info("converting to torch sparse")
+        self.indices = numpy.array_split(numpy.arange(self.G_of_R.shape[0]), torch.cuda.device_count())
+        self.G_of_R_split = []
+        for i in range(self.nGPU):
+            self.G_of_R_split.append(scipy_to_torch_sparse(self.G_of_R[self.indices[i], :]).coalesce().to_sparse_csr().to(f"cuda:{i}", dtype=torch.float32))
+        self.X = (torch.ones(self.G_of_R.shape[1], dtype=torch.float32, requires_grad=False)/self.G_of_R.shape[1])
+        self.L_of_R_inv = torch.zeros(self.G_of_R.shape[0], dtype=torch.float32, requires_grad=False)
+
+    def do_algorithm(self, max_nEMsteps: int, stop_thresh: float) -> Tuple[NDArray[numpy.float32], List[float]]:
+        step_times: list[float] = []
+        for step in range(max_nEMsteps):
+            starttime = datetime.datetime.now()
+            loglik = torch.zeros(1)
+            exp_counts = torch.empty()
+            for i in range(self.nGPU):
+                L_of_R = self.G_of_R_split[i].matmul(self.X.to(f"cuda:{i}"))
+                L_of_R_inv = torch.pow(L_of_R, -1)
+                exp_counts += L_of_R_inv.matmul(self.G_of_R).multiply(self.X).to("cpu")
+                loglik += torch.sum(torch.log(L_of_R)).to("cpu")
+            X_new = exp_counts/torch.sum(exp_counts)
+            print(step, torch.max(torch.abs(X_new-self.X)), loglik, datetime.datetime.now()-starttime)
+            if torch.allclose(X_new, self.X, atol=stop_thresh):
+                break
+            del self.X
+            self.X = X_new
+            step_times.append((datetime.datetime.now()-starttime).total_seconds())
+        return (self.X.cpu().numpy(), step_times)
+
+    def write_X(self, X: NDArray[numpy.float32], out_file: str = "X.pkl"):
+        pickle.dump(X, open(out_file, 'wb'))
+
+
 class TorchCSRStrategy(EMStrategy):
     """
     Concrete EM Strategy implementing the algorithm using torch.sparse_csr while following the base EMStrategy

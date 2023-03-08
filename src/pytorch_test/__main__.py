@@ -3,7 +3,7 @@ import logging
 import sys
 
 from pytorch_test.em_runner import EMRunner
-from pytorch_test.em_strategies import ScipyCSRStrategy, TorchCSRStrategy, ScipyCSRMultiprocessingStrategy
+from pytorch_test.em_strategies import ScipyCSRStrategy, TorchCSRStrategy, ScipyCSRMultiprocessingStrategy, TorchCSRMultiGPUStrategy
 
 
 def parse_args(args):
@@ -17,8 +17,9 @@ def parse_args(args):
     parser.add_argument('--stop_thresh', type=float, help='stop_thresh', default=1e-6)
     parser.add_argument('--max_nEMsteps', type=int, help='max_nEMsteps', default=10000)
     parser.add_argument('--nThreads', type=int, help='nThreads', default=2)
+    parser.add_argument('--nGPU', type=int, help='nGPU', default=2)
     parser.add_argument('--strategy', type=str, help='strategy', default='TorchCSRStrategy',
-                        choices=['TorchCSRStrategy', 'ScipyCSRStrategy', 'ScipyCSRMultiprocessingStrategy'])
+                        choices=['TorchCSRStrategy', 'TorchCSR', 'ScipyCSRStrategy', 'ScipyCSRMultiprocessingStrategy'])
     return parser.parse_args(args)
 
 
@@ -27,6 +28,9 @@ def main():
     logging.basicConfig(level=args.loglevel, format='%(asctime)s %(levelname)s %(message)s', datefmt='%Y-%m-%d %H:%M:%S')
     if args.strategy == 'TorchCSRStrategy':
         emrunner = EMRunner(TorchCSRStrategy(device_name=args.device, G_of_R_list_file=args.G_of_R_list_file),
+                            TE_list=args.TE_list, stop_thresh=args.stop_thresh, max_nEMsteps=args.max_nEMsteps)
+    if args.strategy == 'TorchCSRStrategy':
+        emrunner = EMRunner(TorchCSRMultiGPUStrategy(G_of_R_list_file=args.G_of_R_list_file, nGPU=args.nGPU),
                             TE_list=args.TE_list, stop_thresh=args.stop_thresh, max_nEMsteps=args.max_nEMsteps)
     if args.strategy == 'ScipyCSRStrategy':
         emrunner = EMRunner(ScipyCSRStrategy(G_of_R_list_file=args.G_of_R_list_file),
