@@ -53,7 +53,7 @@ class TorchCSRMultiGPUStrategy(EMStrategy):
     """
 
     def __init__(self, G_of_R_list_file: str = "G_of_R_list.txt", nGPU: int = 4) -> None:
-        self.nGPU = nGPU
+        self.nGPU = max(nGPU, torch.cuda.device_count())
         logging.info(f"running on {self.nGPU} out of {str(torch.cuda.device_count())} GPUs")
         logging.info("reading pkl files")
         self.G_of_R = read_pkl_list(G_of_R_list_file)
