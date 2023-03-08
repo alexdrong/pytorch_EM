@@ -7,7 +7,7 @@ from pytorch_test.em_strategies import ScipyCSRStrategy, TorchCSRStrategy, Scipy
 
 
 def parse_args(args):
-    parser = argparse.ArgumentParser(description=__doc__)
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.ArgumentDefaultsHelpFormatter)
     parser.add_argument('--device', type=str, help='device', default='cpu', choices=['cpu', 'cuda'])
     parser.add_argument('--X_dense', type=bool, help='X_dense', default=True)
     parser.add_argument('--TE_list', type=str, help='TE_list', default='tests/test_data/TE_list.txt')

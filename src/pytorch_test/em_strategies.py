@@ -59,23 +59,24 @@ class TorchCSRMultiGPUStrategy(EMStrategy):
         self.G_of_R = read_pkl_list(G_of_R_list_file)
         logging.info("converting to torch sparse")
         self.indices = numpy.array_split(numpy.arange(self.G_of_R.shape[0]), torch.cuda.device_count())
+        print([len(x) for x in self.indices])
         self.G_of_R_split = []
         for i in range(self.nGPU):
             self.G_of_R_split.append(scipy_to_torch_sparse(self.G_of_R[self.indices[i], :]).coalesce().to_sparse_csr().to(f"cuda:{i}", dtype=torch.float32))
-        self.X = (torch.ones(self.G_of_R.shape[1], dtype=torch.float32, requires_grad=False)/self.G_of_R.shape[1])
+        self.X = (torch.ones(self.G_of_R.shape[1], dtype=torch.float32, requires_grad=False)/self.G_of_R.shape[1]).to("cuda:0")
         self.L_of_R_inv = torch.zeros(self.G_of_R.shape[0], dtype=torch.float32, requires_grad=False)
 
     def do_algorithm(self, max_nEMsteps: int, stop_thresh: float) -> Tuple[NDArray[numpy.float32], List[float]]:
         step_times: list[float] = []
         for step in range(max_nEMsteps):
             starttime = datetime.datetime.now()
-            loglik = torch.zeros(1)
-            exp_counts = torch.zeros(self.G_of_R.shape[1])
+            loglik = torch.zeros(1).to("cuda:0")
+            exp_counts = torch.zeros(self.G_of_R.shape[1]).to("cuda:0")
             for i in range(self.nGPU):
                 L_of_R = self.G_of_R_split[i].matmul(self.X.to(f"cuda:{i}"))
                 L_of_R_inv = torch.pow(L_of_R, -1)
-                loglik += torch.sum(torch.log(L_of_R)).to("cpu")
-                exp_counts = torch.add(exp_counts, L_of_R_inv.matmul(self.G_of_R_split[i]).multiply(self.X.to(f"cuda:{i}")).to("cpu"))
+                loglik += torch.sum(torch.log(L_of_R)).to("cuda:0")
+                exp_counts = torch.add(exp_counts, L_of_R_inv.matmul(self.G_of_R_split[i]).multiply(self.X.to(f"cuda:{i}")).to("cuda:0"))
             X_new = exp_counts/torch.sum(exp_counts)
             print(step, torch.max(torch.abs(X_new-self.X)), loglik, datetime.datetime.now()-starttime)
             if torch.allclose(X_new, self.X, atol=stop_thresh):
